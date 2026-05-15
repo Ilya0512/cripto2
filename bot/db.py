@@ -109,3 +109,19 @@ def process_finished_stakes():
             c.execute("UPDATE users SET balance=balance+?, staked_balance=staked_balance-? WHERE user_id=?", (payout, s["amount"], s["user_id"]))
             c.execute("INSERT INTO transactions(user_id,type,amount,currency,status,created_at,completed_at) VALUES(?,?,?,?,?,?,?)",
                       (s["user_id"], "stake_profit", s["income"], "USDT", "successful", now(), now()))
+
+
+def add_ref_bonus_for_deposit(user_id: int, deposit_amount: float, percent: float):
+    with conn() as c:
+        ref = c.execute("SELECT referrer_id FROM users WHERE user_id=?", (user_id,)).fetchone()
+        if not ref or ref["referrer_id"] is None:
+            return
+        bonus = round(deposit_amount * (percent / 100), 8)
+        if bonus <= 0:
+            return
+        referrer_id = ref["referrer_id"]
+        c.execute("UPDATE users SET balance=balance+? WHERE user_id=?", (bonus, referrer_id))
+        c.execute(
+            "INSERT INTO transactions(user_id,type,amount,currency,status,created_at,completed_at) VALUES(?,?,?,?,?,?,?)",
+            (referrer_id, "ref_bonus", bonus, "USDT", "successful", now(), now()),
+        )
