@@ -59,6 +59,39 @@ def init_db():
             CREATE INDEX IF NOT EXISTS idx_stakes_active ON stakes(status, end_time);
             """
         )
+        _migrate_schema(c)
+
+
+def _table_columns(c, table_name):
+    return {row["name"] for row in c.execute(f"PRAGMA table_info({table_name})").fetchall()}
+
+
+def _migrate_schema(c):
+    tx_columns = _table_columns(c, "transactions")
+    if "id" not in tx_columns:
+        c.executescript(
+            """
+            ALTER TABLE transactions RENAME TO transactions_old;
+            CREATE TABLE transactions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                type TEXT NOT NULL,
+                amount REAL NOT NULL,
+                currency TEXT DEFAULT 'USDT',
+                status TEXT NOT NULL,
+                meta TEXT NULL,
+                created_at TEXT NOT NULL,
+                completed_at TEXT NULL
+            );
+            INSERT INTO transactions(user_id,type,amount,currency,status,meta,created_at,completed_at)
+            SELECT user_id,type,amount,currency,status,meta,created_at,completed_at FROM transactions_old;
+            DROP TABLE transactions_old;
+            """
+        )
+
+    stakes_columns = _table_columns(c, "stakes")
+    if "percent" not in stakes_columns:
+        c.execute("ALTER TABLE stakes ADD COLUMN percent REAL NOT NULL DEFAULT 0")
 
 
 def ensure_user(tg_user, referral_code=None):
