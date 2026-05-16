@@ -106,9 +106,19 @@ def _migrate_schema(c):
     if "completed_at" not in tx_columns:
         c.execute("ALTER TABLE transactions ADD COLUMN completed_at TEXT NULL")
 
+    user_columns = _table_columns(c, "users")
+    if "referral_earned" not in user_columns:
+        c.execute("ALTER TABLE users ADD COLUMN referral_earned REAL DEFAULT 0")
+
     stakes_columns = _table_columns(c, "stakes")
     if "percent" not in stakes_columns:
         c.execute("ALTER TABLE stakes ADD COLUMN percent REAL NOT NULL DEFAULT 0")
+    if "profit" not in stakes_columns:
+        c.execute("ALTER TABLE stakes ADD COLUMN profit REAL NOT NULL DEFAULT 0")
+    if "total_payout" not in stakes_columns:
+        c.execute("ALTER TABLE stakes ADD COLUMN total_payout REAL NOT NULL DEFAULT 0")
+    if "completed_at" not in stakes_columns:
+        c.execute("ALTER TABLE stakes ADD COLUMN completed_at TEXT NULL")
 
 
 def ensure_user(tg_user, referral_code=None):
