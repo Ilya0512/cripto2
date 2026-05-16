@@ -69,9 +69,10 @@ def _table_columns(c, table_name):
 def _migrate_schema(c):
     tx_columns = _table_columns(c, "transactions")
     if "id" not in tx_columns:
-        c.executescript(
+        old_tx_columns = tx_columns
+        c.execute("ALTER TABLE transactions RENAME TO transactions_old")
+        c.execute(
             """
-            ALTER TABLE transactions RENAME TO transactions_old;
             CREATE TABLE transactions (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id INTEGER NOT NULL,
@@ -82,12 +83,28 @@ def _migrate_schema(c):
                 meta TEXT NULL,
                 created_at TEXT NOT NULL,
                 completed_at TEXT NULL
-            );
-            INSERT INTO transactions(user_id,type,amount,currency,status,meta,created_at,completed_at)
-            SELECT user_id,type,amount,currency,status,meta,created_at,completed_at FROM transactions_old;
-            DROP TABLE transactions_old;
+            )
             """
         )
+        currency_expr = "currency" if "currency" in old_tx_columns else "'USDT'"
+        meta_expr = "meta" if "meta" in old_tx_columns else "NULL"
+        completed_at_expr = "completed_at" if "completed_at" in old_tx_columns else "NULL"
+        c.execute(
+            f"""
+            INSERT INTO transactions(user_id,type,amount,currency,status,meta,created_at,completed_at)
+            SELECT user_id, type, amount, {currency_expr}, status, {meta_expr}, created_at, {completed_at_expr}
+            FROM transactions_old
+            """
+        )
+        c.execute("DROP TABLE transactions_old")
+        tx_columns = _table_columns(c, "transactions")
+
+    if "currency" not in tx_columns:
+        c.execute("ALTER TABLE transactions ADD COLUMN currency TEXT DEFAULT 'USDT'")
+    if "meta" not in tx_columns:
+        c.execute("ALTER TABLE transactions ADD COLUMN meta TEXT NULL")
+    if "completed_at" not in tx_columns:
+        c.execute("ALTER TABLE transactions ADD COLUMN completed_at TEXT NULL")
 
     stakes_columns = _table_columns(c, "stakes")
     if "percent" not in stakes_columns:
