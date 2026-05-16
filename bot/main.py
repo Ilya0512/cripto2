@@ -352,7 +352,7 @@ async def callbacks(q: CallbackQuery) -> None:
             blocks.append(f"\n{i}) Пользователь\n")
             blocks.append(user_card(u))
             blocks.append("\n" + "-" * 50)
-        path = _write_export_file(f"users_{category}_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.txt", "\n".join(blocks))
+        path = _write_export_file(f"users_{category}_{datetime.now(UTC).strftime('%Y%m%d_%H%M%S')}.txt", "\n".join(blocks))
         await send_document_safe(q.bot, q.message.chat.id, FSInputFile(str(path)))
         path.unlink(missing_ok=True)
         db.log_admin(uid, "export_users", details=f"category={category}")
@@ -640,7 +640,7 @@ async def callbacks(q: CallbackQuery) -> None:
             lines.append(
                 f"ID заявки: {r['id']}\nПользователь: {r['user_id']}\nUsername: @{r['username'] or '—'}\nИмя: {r['first_name'] or '—'}\nСумма: {r['amount']:.2f} USDT\nАдрес: {meta.get('address','—')}\nСтатус: {r['status']}\nДата создания: {r['created_at']}\nДата завершения: {r['completed_at'] or '—'}\n" + "-" * 40
             )
-        path = _write_export_file(f"withdraws_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.txt", "\n\n".join(lines))
+        path = _write_export_file(f"withdraws_{datetime.now(UTC).strftime('%Y%m%d_%H%M%S')}.txt", "\n\n".join(lines))
         await send_document_safe(q.bot, q.message.chat.id, FSInputFile(str(path)))
         path.unlink(missing_ok=True)
         return

@@ -1,6 +1,6 @@
 import json
 import sqlite3
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 
 from bot.config import SETTINGS
@@ -15,12 +15,33 @@ def conn():
 
 
 def now_str():
-    return datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+    return datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")
 
 
 def _table_columns(c, table_name):
     return {row["name"] for row in c.execute(f"PRAGMA table_info({table_name})").fetchall()}
 
+
+
+
+def _ensure_users_columns(c):
+    user_columns = [
+        ("username", "TEXT"),
+        ("first_name", "TEXT"),
+        ("balance", "REAL DEFAULT 0"),
+        ("staked_balance", "REAL DEFAULT 0"),
+        ("referral_code", "TEXT"),
+        ("referrer_id", "INTEGER NULL"),
+        ("referral_earned", "REAL DEFAULT 0"),
+        ("created_at", "TEXT"),
+        ("is_blocked", "INTEGER DEFAULT 0"),
+        ("blocked_at", "TEXT NULL"),
+        ("blocked_by", "INTEGER NULL"),
+    ]
+    existing = _table_columns(c, "users")
+    for col, typ in user_columns:
+        if col not in existing:
+            c.execute(f"ALTER TABLE users ADD COLUMN {col} {typ}")
 
 def init_db():
     with conn() as c:
@@ -82,22 +103,7 @@ def init_db():
             );
             """
         )
-        user_columns = [
-            ("username", "TEXT"),
-            ("first_name", "TEXT"),
-            ("balance", "REAL DEFAULT 0"),
-            ("staked_balance", "REAL DEFAULT 0"),
-            ("referral_code", "TEXT"),
-            ("referrer_id", "INTEGER NULL"),
-            ("referral_earned", "REAL DEFAULT 0"),
-            ("created_at", "TEXT"),
-            ("is_blocked", "INTEGER DEFAULT 0"),
-            ("blocked_at", "TEXT NULL"),
-            ("blocked_by", "INTEGER NULL"),
-        ]
-        for col, typ in user_columns:
-            if col not in _table_columns(c, "users"):
-                c.execute(f"ALTER TABLE users ADD COLUMN {col} {typ}")
+        _ensure_users_columns(c)
         sync_admins_from_env()
 
 
@@ -139,6 +145,7 @@ def log_admin(admin_id: int, action: str, target_type=None, target_id=None, deta
 
 def ensure_user(tg_user, referral_code=None):
     with conn() as c:
+        _ensure_users_columns(c)
         row = c.execute("SELECT * FROM users WHERE user_id=?", (tg_user.id,)).fetchone()
         if row:
             c.execute("UPDATE users SET username=?, first_name=? WHERE user_id=?", (tg_user.username, tg_user.first_name, tg_user.id))
