@@ -3,6 +3,7 @@ from pathlib import Path
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, InputFile, Update
+from telegram.error import BadRequest
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes, MessageHandler, filters
 
 from bot import db
@@ -40,24 +41,33 @@ async def show_main_menu(target, edit=False):
         "Инвестируйте, используйте стейкинг и получайте доход.\n\n"
         "Выберите действие:"
     )
-    if SETTINGS.banner_path and (SETTINGS.banner_path.startswith("http") or Path(SETTINGS.banner_path).exists()):
-        if edit and getattr(target, "message", None):
-            await target.message.reply_photo(
-                photo=SETTINGS.banner_path if SETTINGS.banner_path.startswith("http") else InputFile(SETTINGS.banner_path),
-                caption=caption,
-                reply_markup=main_menu_kb(),
-            )
-        else:
-            await target.reply_photo(
-                photo=SETTINGS.banner_path if SETTINGS.banner_path.startswith("http") else InputFile(SETTINGS.banner_path),
-                caption=caption,
-                reply_markup=main_menu_kb(),
-            )
-    else:
+    async def send_text_menu():
         if edit and getattr(target, "edit_message_text", None):
             await target.edit_message_text(caption, reply_markup=main_menu_kb())
         else:
             await target.reply_text(caption, reply_markup=main_menu_kb())
+
+    if SETTINGS.banner_path and (SETTINGS.banner_path.startswith("http") or Path(SETTINGS.banner_path).exists()):
+        try:
+            if edit and getattr(target, "message", None):
+                await target.message.reply_photo(
+                    photo=SETTINGS.banner_path if SETTINGS.banner_path.startswith("http") else InputFile(SETTINGS.banner_path),
+                    caption=caption,
+                    reply_markup=main_menu_kb(),
+                )
+            else:
+                await target.reply_photo(
+                    photo=SETTINGS.banner_path if SETTINGS.banner_path.startswith("http") else InputFile(SETTINGS.banner_path),
+                    caption=caption,
+                    reply_markup=main_menu_kb(),
+                )
+            return
+        except BadRequest:
+            # Если Telegram не смог обработать изображение (например, формат/битый файл),
+            # показываем меню текстом, чтобы бот оставался рабочим.
+            pass
+
+    await send_text_menu()
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
