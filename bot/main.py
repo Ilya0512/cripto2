@@ -47,6 +47,16 @@ def status_emoji(status: str) -> str:
     return {"pending": "⏳", "completed": "✅", "failed": "❌"}.get(status, "⏳")
 
 
+
+
+async def edit_message_content(message: Message, text: str, markup: InlineKeyboardMarkup) -> None:
+    if message.text is not None:
+        await message.edit_text(text, reply_markup=markup)
+        return
+    if message.caption is not None:
+        await message.edit_caption(caption=text, reply_markup=markup)
+        return
+    await message.answer(text, reply_markup=markup)
 async def send_banner_or_text(message: Message, text: str, markup: InlineKeyboardMarkup) -> None:
     banner_path = Path(SETTINGS.banner_path)
     if SETTINGS.banner_path and banner_path.exists() and banner_path.is_file():
@@ -90,7 +100,7 @@ async def callbacks(q: CallbackQuery) -> None:
             f"Реферальный процент: {SETTINGS.referral_percent:g}%\n\n"
             f"Поддержка: @{SETTINGS.support_username}"
         )
-        await q.message.edit_text(txt, reply_markup=kb([[back_btn()]]))
+        await edit_message_content(q.message, txt, kb([[back_btn()]]))
     elif q.data == "menu_wallet":
         u = db.get_user(uid)
         txt = (
@@ -100,9 +110,9 @@ async def callbacks(q: CallbackQuery) -> None:
             f"📊 Активных стейков: {db.get_active_stakes_count(uid)}\n\n"
             "Выберите действие:"
         )
-        await q.message.edit_text(txt, reply_markup=wallet_kb())
+        await edit_message_content(q.message, txt, wallet_kb())
     elif q.data == "wallet_deposit":
-        await q.message.edit_text("💼 Пополнение баланса\n\nВыберите способ пополнения:", reply_markup=kb([
+        await edit_message_content(q.message, "💼 Пополнение баланса\n\nВыберите способ пополнения:", kb([
             [InlineKeyboardButton(text="Crypto Bot", callback_data="deposit_crypto")],
             [InlineKeyboardButton(text="Telegram Stars", callback_data="deposit_stars")],
             [back_btn("menu_wallet")],
@@ -110,15 +120,16 @@ async def callbacks(q: CallbackQuery) -> None:
     elif q.data in {"deposit_crypto", "deposit_stars"}:
         user_state["state"] = "await_deposit"
         user_state["deposit_method"] = "cryptobot" if q.data == "deposit_crypto" else "stars"
-        await q.message.edit_text(f"Введите сумму пополнения (минимум {SETTINGS.min_deposit_usdt:g} USDT):", reply_markup=kb([[back_btn("menu_wallet")]]))
+        await edit_message_content(q.message, f"Введите сумму пополнения (минимум {SETTINGS.min_deposit_usdt:g} USDT):", kb([[back_btn("menu_wallet")]]))
     elif q.data == "wallet_withdraw":
         user_state["state"] = "await_withdraw"
         u = db.get_user(uid)
-        await q.message.edit_text(f"📤 Вывод средств\n\n💰 Ваш баланс: {u['balance']:.2f} USDT\nМинимальная сумма вывода: {SETTINGS.min_withdraw_usdt:g} USDT\n\nВведите сумму для вывода:", reply_markup=kb([[back_btn("menu_wallet")]]))
+        await edit_message_content(q.message, f"📤 Вывод средств\n\n💰 Ваш баланс: {u['balance']:.2f} USDT\nМинимальная сумма вывода: {SETTINGS.min_withdraw_usdt:g} USDT\n\nВведите сумму для вывода:", kb([[back_btn("menu_wallet")]]))
     elif q.data == "wallet_staking":
-        await q.message.edit_text(
+        await edit_message_content(
+            q.message,
             "📊 Стейкинг\n\n📅 Дневной план\n• Срок: 1 день\n• Доход: +1%\n\n📅 Недельный план\n• Срок: 7 дней\n• Доход: +5%\n\n📈 Месячный план\n• Срок: 10 дней\n• Доход: +10%\n\nВыберите план:",
-            reply_markup=kb([
+            kb([
                 [InlineKeyboardButton(text="Дневной", callback_data="staking_daily"), InlineKeyboardButton(text="Недельный", callback_data="staking_weekly")],
                 [InlineKeyboardButton(text="Месячный", callback_data="staking_monthly"), InlineKeyboardButton(text="Мои стейки", callback_data="staking_my")],
                 [back_btn("menu_wallet")],
@@ -129,27 +140,27 @@ async def callbacks(q: CallbackQuery) -> None:
         user_state["state"] = "await_stake"
         user_state["stake_plan"] = plan
         p = SETTINGS.plans[plan]
-        await q.message.edit_text(f"📊 {p.title} план\nПериод: {p.days} дн.\nДоход: +{p.percent}%\n\nВведите сумму:", reply_markup=kb([[back_btn("wallet_staking")]]))
+        await edit_message_content(q.message, f"📊 {p.title} план\nПериод: {p.days} дн.\nДоход: +{p.percent}%\n\nВведите сумму:", kb([[back_btn("wallet_staking")]]))
     elif q.data == "staking_my":
         rows = db.list_active_stakes(uid)
         txt = "📭 У вас пока нет активных стейков." if not rows else "\n".join(["📊 Ваши активные стейки:"] + [f"• {s['plan']} | {s['amount']:.2f} USDT | +{s['profit']:.2f} | до {s['end_time']}" for s in rows])
-        await q.message.edit_text(txt, reply_markup=kb([[back_btn("wallet_staking")]]))
+        await edit_message_content(q.message, txt, kb([[back_btn("wallet_staking")]]))
     elif q.data == "wallet_history":
         txs = db.list_recent_transactions(uid, 10)
         txt = "📜 История пуста." if not txs else "\n".join(["📜 Последние транзакции:"] + [f"{status_emoji(t['status'])} {t['type'].title()}: {t['amount']:.2f} {t['currency']} ({t['created_at']})" for t in txs])
-        await q.message.edit_text(txt, reply_markup=kb([[back_btn("menu_wallet")]]))
+        await edit_message_content(q.message, txt, kb([[back_btn("menu_wallet")]]))
     elif q.data == "menu_referrals":
         u = db.get_user(uid)
         with db.conn() as c:
             refs = c.execute("SELECT COUNT(*) c FROM users WHERE referrer_id=?", (uid,)).fetchone()["c"]
         link = f"https://t.me/{SETTINGS.bot_username}?start={u['referral_code']}"
         txt = f"👥 Реферальная программа\n\nРефералов: {refs}\nЗаработано: {u['referral_earned']:.2f} USDT\n\n🔗 {link}"
-        await q.message.edit_text(txt, reply_markup=kb([[InlineKeyboardButton(text="Скопировать", callback_data="referrals_copy")], [back_btn()]]))
+        await edit_message_content(q.message, txt, kb([[InlineKeyboardButton(text="Скопировать", callback_data="referrals_copy")], [back_btn()]]))
     elif q.data == "referrals_copy":
         u = db.get_user(uid)
         await q.message.answer(f"https://t.me/{SETTINGS.bot_username}?start={u['referral_code']}")
     elif q.data == "menu_chat":
-        await q.message.edit_text(f"💬 Поддержка: @{SETTINGS.support_username}", reply_markup=kb([[InlineKeyboardButton(text="Открыть чат", url=f"https://t.me/{SETTINGS.support_username}")], [back_btn()]]))
+        await edit_message_content(q.message, f"💬 Поддержка: @{SETTINGS.support_username}", kb([[InlineKeyboardButton(text="Открыть чат", url=f"https://t.me/{SETTINGS.support_username}")], [back_btn()]]))
 
 
 @router.message(F.text)
