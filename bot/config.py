@@ -5,6 +5,17 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
+def _parse_admin_ids(raw: str) -> tuple[int, ...]:
+    ids = []
+    for part in (raw or "").split(","):
+        part = part.strip()
+        if not part:
+            continue
+        if part.isdigit():
+            ids.append(int(part))
+    return tuple(dict.fromkeys(ids))
+
+
 @dataclass(frozen=True)
 class StakingPlan:
     key: str
@@ -23,12 +34,16 @@ class Settings:
     wallet_banner_path: str = os.getenv("WALLET_BANNER_PATH", "").strip()
     info_banner_path: str = os.getenv("INFO_BANNER_PATH", "").strip()
     referrals_banner_path: str = os.getenv("REFERRALS_BANNER_PATH", "").strip()
-    cryptobot_token: str = os.getenv("CRYPTOBOT_TOKEN", "")
 
     min_deposit_usdt: float = float(os.getenv("MIN_DEPOSIT_USDT", "15"))
     min_stake_usdt: float = float(os.getenv("MIN_STAKE_USDT", "15"))
     min_withdraw_usdt: float = float(os.getenv("MIN_WITHDRAW_USDT", "20"))
     referral_percent: float = float(os.getenv("REFERRAL_PERCENT", "7"))
+
+    main_admin_id: int = int(os.getenv("MAIN_ADMIN_ID", "0") or "0")
+    admin_ids: tuple[int, ...] = _parse_admin_ids(os.getenv("ADMIN_IDS", ""))
+    admin_can_process_withdraws: bool = os.getenv("ADMIN_CAN_PROCESS_WITHDRAWS", "false").lower() == "true"
+    withdraw_notify_all_admins: bool = os.getenv("WITHDRAW_NOTIFY_ALL_ADMINS", "false").lower() == "true"
 
     plans: dict = None
 
