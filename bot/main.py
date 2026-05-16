@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 import asyncio
@@ -32,6 +33,7 @@ user_states: dict[int, dict] = {}
 WELCOME_TEXT = "🏠 Добро пожаловать!\nИнвестируйте и зарабатывайте с нашим проектом."
 BOT_USERNAME_RUNTIME: str = ""
 EXPORTS_DIR = Path("exports")
+logger = logging.getLogger(__name__)
 
 PLAN_TRANSLATIONS = {"daily": "Дневной", "weekly": "Недельный", "monthly": "Месячный"}
 TX_TRANSLATIONS = {
@@ -87,10 +89,13 @@ def main_menu_kb(user_id: int | None = None) -> InlineKeyboardMarkup:
 
 
 def wallet_kb() -> InlineKeyboardMarkup:
+    # Telegram-клиенты могут по-разному отображать style="primary": Desktop показывает синим,
+    # некоторые мобильные клиенты могут отображать primary через цвет темы/акцента.
+    # Со стороны бота можно передать только style, но нельзя гарантировать точный оттенок на всех клиентах.
     return kb([
-        [styled_button("Пополнить", callback_data="wallet_deposit", style=ButtonStyle.SUCCESS), styled_button("Вывести", callback_data="wallet_withdraw", style=ButtonStyle.DANGER)],
-        [styled_button("Стейкинг", callback_data="wallet_stake", style=ButtonStyle.PRIMARY), styled_button("История", callback_data="wallet_history", style=ButtonStyle.PRIMARY)],
-        [back_btn("wallet_back")],
+        [styled_button("Пополнить", callback_data="wallet_deposit", style="success"), styled_button("Вывести", callback_data="wallet_withdraw", style="danger")],
+        [styled_button("Стейкинг", callback_data="wallet_stake", style="primary"), styled_button("История", callback_data="wallet_history", style="primary")],
+        [styled_button("← Назад", callback_data="wallet_back", style="danger")],
     ])
 
 
@@ -657,7 +662,13 @@ async def callbacks(q: CallbackQuery) -> None:
     if q.data == "menu_wallet":
         u = db.get_user(uid)
         txt = f"💰 Ваш кошелек\n\n💵 Доступный баланс: {u['balance']:.2f} USDT\n🔒 В стейкинге: {u['staked_balance']:.2f} USDT\n📊 Активных стейков: {db.get_active_stakes_count(uid)}\n\nВыберите действие:"
-        await open_section(q, txt, wallet_kb(), SETTINGS.wallet_banner_path); return
+        wallet_markup = wallet_kb()
+        if hasattr(wallet_markup, "model_dump"):
+            wallet_markup_json = json.dumps(wallet_markup.model_dump(exclude_none=True), ensure_ascii=False)
+        else:
+            wallet_markup_json = json.dumps(wallet_markup, ensure_ascii=False)
+        logger.debug("wallet reply_markup: %s", wallet_markup_json)
+        await open_section(q, txt, wallet_markup, SETTINGS.wallet_banner_path); return
     if q.data == "wallet_deposit":
         await open_section(q, "💼 Пополнение баланса\n\nВыберите способ пополнения:", kb([[styled_button("Crypto Bot", callback_data="deposit_crypto")], [styled_button("Telegram Stars", callback_data="deposit_stars")], [back_btn("menu_wallet")]])); return
     if q.data in {"deposit_crypto", "deposit_stars"}:
