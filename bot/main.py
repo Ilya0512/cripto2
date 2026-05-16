@@ -7,7 +7,7 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.filters import CommandStart
 from aiogram.filters.command import CommandObject
-from aiogram.types import CallbackQuery, FSInputFile, InlineKeyboardButton, InlineKeyboardMarkup, InputFile, Message
+from aiogram.types import CallbackQuery, FSInputFile, InlineKeyboardButton, InlineKeyboardMarkup, Message
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from bot import db
@@ -95,25 +95,61 @@ def referral_link(ref_code: str) -> str:
     return f"https://t.me/{BOT_USERNAME_RUNTIME}?start={ref_code}"
 
 
-async def delete_current_message(message: Message) -> None:
+async def delete_message_safe(bot: Bot, chat_id: int, message_id: int) -> None:
     try:
-        await message.delete()
+        await bot.delete_message(chat_id=chat_id, message_id=message_id)
     except Exception:
         pass
 
 
-async def send_banner_or_text(message: Message) -> None:
-    banner_path = Path(SETTINGS.banner_path)
-    if SETTINGS.banner_path and banner_path.exists() and banner_path.is_file():
-        photo: InputFile = FSInputFile(str(banner_path))
-        await message.answer_photo(photo=photo, caption=WELCOME_TEXT, reply_markup=main_menu_kb())
-        return
-    await message.answer(WELCOME_TEXT, reply_markup=main_menu_kb())
+def get_main_banner_path() -> str:
+    return SETTINGS.main_banner_path or SETTINGS.banner_path
 
 
-async def open_section(q: CallbackQuery, text: str, markup: InlineKeyboardMarkup) -> None:
-    await delete_current_message(q.message)
-    await q.message.answer(text, reply_markup=markup)
+async def send_section_with_banner(
+    bot: Bot,
+    chat_id: int,
+    banner_path: str,
+    caption: str,
+    reply_markup: InlineKeyboardMarkup | None = None,
+    parse_mode: ParseMode | str | None = None,
+):
+    if banner_path:
+        path = Path(banner_path)
+        if path.exists() and path.is_file():
+            return await bot.send_photo(
+                chat_id=chat_id,
+                photo=FSInputFile(str(path)),
+                caption=caption,
+                reply_markup=reply_markup,
+                parse_mode=parse_mode,
+            )
+    return await bot.send_message(
+        chat_id=chat_id,
+        text=caption,
+        reply_markup=reply_markup,
+        parse_mode=parse_mode,
+    )
+
+
+async def send_main_menu(bot: Bot, chat_id: int):
+    return await send_section_with_banner(
+        bot=bot,
+        chat_id=chat_id,
+        banner_path=get_main_banner_path(),
+        caption=WELCOME_TEXT,
+        reply_markup=main_menu_kb(),
+    )
+
+
+async def open_section(
+    q: CallbackQuery,
+    text: str,
+    markup: InlineKeyboardMarkup,
+    banner_path: str = "",
+) -> None:
+    await delete_message_safe(q.bot, q.message.chat.id, q.message.message_id)
+    await send_section_with_banner(q.bot, q.message.chat.id, banner_path, text, markup)
 
 
 @router.message(CommandStart(deep_link=True))
@@ -121,7 +157,7 @@ async def open_section(q: CallbackQuery, text: str, markup: InlineKeyboardMarkup
 async def start_handler(message: Message, command: CommandObject) -> None:
     ref_code = command.args if command and command.args else None
     db.ensure_user(message.from_user, ref_code)
-    await send_banner_or_text(message)
+    await send_main_menu(message.bot, message.chat.id)
 
 
 @router.callback_query()
@@ -131,24 +167,29 @@ async def callbacks(q: CallbackQuery) -> None:
     db.ensure_user(q.from_user)
     user_state = user_states.setdefault(uid, {})
 
-    if q.data in {"back_main", "wallet_back"}:
+    if q.data in {"back_main", "wallet_back", "go_main_menu"}:
         user_state.clear()
-        await delete_current_message(q.message)
-        await send_banner_or_text(q.message)
+        await delete_message_safe(q.bot, q.message.chat.id, q.message.message_id)
+        await send_main_menu(q.bot, q.message.chat.id)
     elif q.data == "menu_info":
         txt = (
-            "ℹ️ Информация о проекте\n\n"
-            "📅 Планы стейкинга:\n"
-            "• Дневной: 1 день, +1%\n"
-            "• Недельный: 7 дней, +5%\n"
-            "• Месячный: 10 дней, +10%\n\n"
-            f"Минимум пополнения: {SETTINGS.min_deposit_usdt:g} USDT\n"
-            f"Минимум стейкинга: {SETTINGS.min_stake_usdt:g} USDT\n"
-            f"Минимум вывода: {SETTINGS.min_withdraw_usdt:g} USDT\n"
-            f"Реферальный процент: {SETTINGS.referral_percent:g}%\n\n"
+            "ℹ️ Информация\n\n"
+            "Мы инвестиционный проект, который позволяет:\n"
+            "• пополнять баланс;\n"
+            "• использовать стейкинг;\n"
+            "• выводить средства;\n"
+            "• зарабатывать на партнерской программе.\n\n"
+            "Планы стейкинга:\n"
+            "• Дневной — 1 день, +1%\n"
+            "• Недельный — 7 дней, +5%\n"
+            "• Месячный — 10 дней, +10%\n\n"
+            "Минимальные суммы:\n"
+            f"• Пополнение: {SETTINGS.min_deposit_usdt:g} USDT\n"
+            f"• Стейкинг: {SETTINGS.min_stake_usdt:g} USDT\n"
+            f"• Вывод: {SETTINGS.min_withdraw_usdt:g} USDT\n\n"
             f"Поддержка: @{SETTINGS.support_username}"
         )
-        await open_section(q, txt, kb([[back_btn()]]))
+        await open_section(q, txt, kb([[back_btn()]]), SETTINGS.info_banner_path)
     elif q.data == "menu_wallet":
         u = db.get_user(uid)
         txt = (
@@ -158,7 +199,7 @@ async def callbacks(q: CallbackQuery) -> None:
             f"📊 Активных стейков: {db.get_active_stakes_count(uid)}\n\n"
             "Выберите действие:"
         )
-        await open_section(q, txt, wallet_kb())
+        await open_section(q, txt, wallet_kb(), SETTINGS.wallet_banner_path)
     elif q.data == "wallet_deposit":
         await open_section(q, "💼 Пополнение баланса\n\nВыберите способ пополнения:", kb([
             [styled_button("Crypto Bot", callback_data="deposit_crypto")],
@@ -228,7 +269,7 @@ async def callbacks(q: CallbackQuery) -> None:
             f"{link}\n\n"
             "Делитесь ссылкой с друзьями и зарабатывайте!"
         )
-        await open_section(q, txt, kb([[copy_button("Скопировать", link)], [back_btn()]]))
+        await open_section(q, txt, kb([[copy_button("Скопировать", link)], [back_btn()]]), SETTINGS.referrals_banner_path)
 
 
 @router.message(F.text)
@@ -281,7 +322,10 @@ async def amount_input(message: Message) -> None:
         db.create_stake(uid, plan.key, amount, plan.percent, profit, round(amount + profit, 2), end)
         db.add_transaction(uid, "stake", amount, status="completed", completed=True, meta={"plan": plan.key})
         state.clear()
-        await message.answer(f"✅ Подтверждение стейка\n\nСумма: {amount:.2f} USDT\nДоход: +{profit:.2f} USDT\nДата окончания: {end}")
+        await message.answer(
+            f"✅ Подтверждение стейка\n\nСумма: {amount:.2f} USDT\nДоход: +{profit:.2f} USDT\nДата окончания: {end}",
+            reply_markup=kb([[styled_button("🏠 Главное меню", callback_data="go_main_menu")]]),
+        )
 
 
 async def main() -> None:
