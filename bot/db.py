@@ -82,7 +82,20 @@ def init_db():
             );
             """
         )
-        for col, typ in [("is_blocked", "INTEGER DEFAULT 0"), ("blocked_at", "TEXT NULL"), ("blocked_by", "INTEGER NULL")]:
+        user_columns = [
+            ("username", "TEXT"),
+            ("first_name", "TEXT"),
+            ("balance", "REAL DEFAULT 0"),
+            ("staked_balance", "REAL DEFAULT 0"),
+            ("referral_code", "TEXT"),
+            ("referrer_id", "INTEGER NULL"),
+            ("referral_earned", "REAL DEFAULT 0"),
+            ("created_at", "TEXT"),
+            ("is_blocked", "INTEGER DEFAULT 0"),
+            ("blocked_at", "TEXT NULL"),
+            ("blocked_by", "INTEGER NULL"),
+        ]
+        for col, typ in user_columns:
             if col not in _table_columns(c, "users"):
                 c.execute(f"ALTER TABLE users ADD COLUMN {col} {typ}")
         sync_admins_from_env()
