@@ -19,6 +19,10 @@ class Settings:
     bot_username: str = os.getenv("BOT_USERNAME", "").strip()
     support_username: str = os.getenv("SUPPORT_USERNAME", "").strip().lstrip("@")
     banner_path: str = os.getenv("BANNER_PATH", "")
+    main_banner_path: str = os.getenv("MAIN_BANNER_PATH", "").strip()
+    wallet_banner_path: str = os.getenv("WALLET_BANNER_PATH", "").strip()
+    info_banner_path: str = os.getenv("INFO_BANNER_PATH", "").strip()
+    referrals_banner_path: str = os.getenv("REFERRALS_BANNER_PATH", "").strip()
     cryptobot_token: str = os.getenv("CRYPTOBOT_TOKEN", "")
 
     min_deposit_usdt: float = float(os.getenv("MIN_DEPOSIT_USDT", "15"))
