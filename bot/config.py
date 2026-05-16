@@ -19,6 +19,7 @@ class Settings:
     bot_username: str = os.getenv("BOT_USERNAME", "your_bot_username")
     support_username: str = os.getenv("SUPPORT_USERNAME", "chromkey")
     banner_path: str = os.getenv("BANNER_PATH", "")
+    cryptobot_token: str = os.getenv("CRYPTOBOT_TOKEN", "")
 
     min_deposit_usdt: float = float(os.getenv("MIN_DEPOSIT_USDT", "0.1"))
     min_stake_usdt: float = float(os.getenv("MIN_STAKE_USDT", "10"))

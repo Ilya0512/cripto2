@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -62,7 +62,7 @@ async def show_main_menu(target, edit=False):
                     reply_markup=main_menu_kb(),
                 )
             return
-        except BadRequest:
+        except (BadRequest, FileNotFoundError, OSError):
             # Если Telegram не смог обработать изображение (например, формат/битый файл),
             # показываем меню текстом, чтобы бот оставался рабочим.
             pass
@@ -121,13 +121,21 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ]))
     elif q.data in {"deposit_crypto", "deposit_stars"}:
         method = "cryptobot" if q.data == "deposit_crypto" else "stars"
+        if method == "cryptobot" and not SETTINGS.cryptobot_token:
+            return await q.edit_message_text(
+                "⚠️ Пополнение через Crypto Bot временно недоступно: не настроен CRYPTOBOT_TOKEN в .env",
+                reply_markup=kb([[InlineKeyboardButton("Назад", callback_data="menu_wallet")]]),
+            )
         context.user_data["state"] = "await_deposit"
         context.user_data["deposit_method"] = method
-        await q.edit_message_text("Введите сумму пополнения (минимум 0.1 USDT):", reply_markup=kb([[InlineKeyboardButton("Назад", callback_data="menu_wallet")]]))
+        await q.edit_message_text(
+            f"Введите сумму пополнения (минимум {SETTINGS.min_deposit_usdt:g} USDT):",
+            reply_markup=kb([[InlineKeyboardButton("Назад", callback_data="menu_wallet")]]),
+        )
     elif q.data == "wallet_withdraw":
         context.user_data["state"] = "await_withdraw"
         u = db.get_user(uid)
-        await q.edit_message_text(f"📤 Вывод средств\n\n💰 Ваш баланс: {u['balance']:.2f} USDT\nМинимальная сумма вывода: 5 USDT\n\nВведите сумму для вывода:", reply_markup=kb([[InlineKeyboardButton("Назад", callback_data="menu_wallet")]]))
+        await q.edit_message_text(f"📤 Вывод средств\n\n💰 Ваш баланс: {u['balance']:.2f} USDT\nМинимальная сумма вывода: {SETTINGS.min_withdraw_usdt:g} USDT\n\nВведите сумму для вывода:", reply_markup=kb([[InlineKeyboardButton("Назад", callback_data="menu_wallet")]]))
     elif q.data == "wallet_staking":
         await q.edit_message_text(
             "📊 Стейкинг\n\nЗаморозьте средства на определенный период и получите гарантированную прибыль!\n\n"
@@ -146,7 +154,7 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["stake_plan"] = plan
         p = SETTINGS.plans[plan]
         u = db.get_user(uid)
-        await q.edit_message_text(f"📊 {p.title} план стейкинга\n\n⏱ Период: {p.days} дн.\n📈 Доход: +{p.percent}%\n\n💰 Ваш баланс: {u['balance']:.2f} USDT\nМинимальная сумма: 10 USDT\n\nВведите сумму для стейкинга:", reply_markup=kb([[InlineKeyboardButton("Назад", callback_data="wallet_staking")]]))
+        await q.edit_message_text(f"📊 {p.title} план стейкинга\n\n⏱ Период: {p.days} дн.\n📈 Доход: +{p.percent}%\n\n💰 Ваш баланс: {u['balance']:.2f} USDT\nМинимальная сумма: {SETTINGS.min_stake_usdt:g} USDT\n\nВведите сумму для стейкинга:", reply_markup=kb([[InlineKeyboardButton("Назад", callback_data="wallet_staking")]]))
     elif q.data == "staking_my":
         rows = db.list_active_stakes(uid)
         if not rows:
@@ -197,7 +205,7 @@ async def message_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = db.get_user(uid)
     if state == "await_deposit":
         if amount < SETTINGS.min_deposit_usdt:
-            return await update.message.reply_text("Минимальная сумма пополнения: 0.1 USDT")
+            return await update.message.reply_text(f"Минимальная сумма пополнения: {SETTINGS.min_deposit_usdt:g} USDT")
         method = context.user_data.get("deposit_method")
         tx = db.add_transaction(uid, "deposit", amount, status="pending", meta={"method": method})
         db.complete_transaction(tx)
@@ -208,7 +216,7 @@ async def message_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if state == "await_withdraw":
         if amount < SETTINGS.min_withdraw_usdt:
-            return await update.message.reply_text("Минимальная сумма вывода: 5 USDT")
+            return await update.message.reply_text(f"Минимальная сумма вывода: {SETTINGS.min_withdraw_usdt:g} USDT")
         if amount > user["balance"]:
             return await update.message.reply_text("Недостаточно средств на балансе.")
         db.update_balance(uid, delta_balance=-amount)
@@ -218,13 +226,13 @@ async def message_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if state == "await_stake":
         if amount < SETTINGS.min_stake_usdt:
-            return await update.message.reply_text("Минимальная сумма стейкинга: 10 USDT")
+            return await update.message.reply_text(f"Минимальная сумма стейкинга: {SETTINGS.min_stake_usdt:g} USDT")
         if amount > user["balance"]:
             return await update.message.reply_text("Недостаточно средств на балансе.")
         plan = SETTINGS.plans[context.user_data["stake_plan"]]
         profit = round(amount * plan.percent / 100, 2)
         total = round(amount + profit, 2)
-        end = (datetime.utcnow() + timedelta(days=plan.days)).strftime("%Y-%m-%d %H:%M:%S")
+        end = (datetime.now(UTC) + timedelta(days=plan.days)).strftime("%Y-%m-%d %H:%M:%S")
         db.update_balance(uid, delta_balance=-amount, delta_staked=amount)
         db.create_stake(uid, plan.key, amount, plan.percent, profit, total, end)
         db.add_transaction(uid, "stake", amount, status="completed", completed=True, meta={"plan": plan.key})
