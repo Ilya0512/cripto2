@@ -3,7 +3,7 @@ from pathlib import Path
 
 from aiogram import Bot, Dispatcher, F, Router
 from aiogram.client.default import DefaultBotProperties
-from aiogram.enums import ButtonStyle, ParseMode
+from aiogram.enums import ParseMode
 from aiogram.filters import CommandStart
 from aiogram.filters.command import CommandObject
 from aiogram.types import CallbackQuery, FSInputFile, InlineKeyboardButton, InlineKeyboardMarkup, InputFile, Message
@@ -21,12 +21,12 @@ def kb(rows: list[list[InlineKeyboardButton]]) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def style_btn(text: str, callback_data: str, button_style: ButtonStyle | None = None) -> InlineKeyboardButton:
-    return InlineKeyboardButton(text=text, callback_data=callback_data, button_style=button_style)
+def style_btn(text: str, callback_data: str) -> InlineKeyboardButton:
+    return InlineKeyboardButton(text=text, callback_data=callback_data)
 
 
 def back_btn(target: str = "back_main") -> InlineKeyboardButton:
-    return style_btn("← Назад", target, ButtonStyle.DANGER)
+    return style_btn("← Назад", target)
 
 
 def main_menu_kb() -> InlineKeyboardMarkup:
@@ -38,8 +38,8 @@ def main_menu_kb() -> InlineKeyboardMarkup:
 
 def wallet_kb() -> InlineKeyboardMarkup:
     return kb([
-        [style_btn("Пополнить", "wallet_deposit", ButtonStyle.SUCCESS), style_btn("Вывести", "wallet_withdraw", ButtonStyle.DANGER)],
-        [style_btn("Стейкинг", "wallet_stake", ButtonStyle.PRIMARY), style_btn("История", "wallet_history", ButtonStyle.PRIMARY)],
+        [style_btn("Пополнить", "wallet_deposit"), style_btn("Вывести", "wallet_withdraw")],
+        [style_btn("Стейкинг", "wallet_stake"), style_btn("История", "wallet_history")],
         [back_btn("wallet_back")],
     ])
 
