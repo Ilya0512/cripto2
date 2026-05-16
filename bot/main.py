@@ -13,6 +13,7 @@ from bot import db
 from bot.config import SETTINGS
 
 router = Router()
+user_states: dict[int, dict[str, str]] = {}
 
 
 def kb(rows: list[list[InlineKeyboardButton]]) -> InlineKeyboardMarkup:
@@ -71,8 +72,7 @@ async def callbacks(q: CallbackQuery) -> None:
     await q.answer()
     uid = q.from_user.id
     db.ensure_user(q.from_user)
-    state = q.bot.session.middleware_data.setdefault("states", {})
-    user_state = state.setdefault(uid, {})
+    user_state = user_states.setdefault(uid, {})
 
     if q.data == "back_main":
         user_state.clear()
@@ -155,7 +155,7 @@ async def callbacks(q: CallbackQuery) -> None:
 @router.message(F.text)
 async def amount_input(message: Message) -> None:
     uid = message.from_user.id
-    state = message.bot.session.middleware_data.setdefault("states", {}).setdefault(uid, {})
+    state = user_states.setdefault(uid, {})
     step = state.get("state")
     if not step:
         return
