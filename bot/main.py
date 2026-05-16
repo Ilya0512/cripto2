@@ -94,7 +94,7 @@ def wallet_kb() -> InlineKeyboardMarkup:
     # Со стороны бота можно передать только style, но нельзя гарантировать точный оттенок на всех клиентах.
     return kb([
         [styled_button("Пополнить", callback_data="wallet_deposit", style="success"), styled_button("Вывести", callback_data="wallet_withdraw", style="danger")],
-        [styled_button("Стейкинг", callback_data="wallet_stake", style="primary"), styled_button("История", callback_data="wallet_history", style="primary")],
+        [styled_button("Стейкинг", callback_data="wallet_stake"), styled_button("История", callback_data="wallet_history")],
         [styled_button("← Назад", callback_data="wallet_back", style="danger")],
     ])
 
