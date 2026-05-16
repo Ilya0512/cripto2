@@ -1,276 +1,243 @@
 from datetime import datetime, timedelta
+from pathlib import Path
 
 from apscheduler.schedulers.background import BackgroundScheduler
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
-from telegram.ext import (
-    Application,
-    CallbackQueryHandler,
-    CommandHandler,
-    ContextTypes,
-    MessageHandler,
-    filters,
-)
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, InputFile, Update
+from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes, MessageHandler, filters
 
 from bot import db
 from bot.config import SETTINGS
 
 
-def btn(text: str, action: str) -> InlineKeyboardButton:
-    return InlineKeyboardButton(text, callback_data=action)
+def kb(rows):
+    return InlineKeyboardMarkup(rows)
 
 
-def main_menu() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([
-        [btn("💼 Кошелек", "menu_wallet"), btn("ℹ️ Информация", "menu_info")],
-        [btn("💬 Чат", "menu_chat"), btn("👥 Рефералы", "menu_refs")],
+def main_menu_kb():
+    return kb([
+        [InlineKeyboardButton("💰 Кошелек", callback_data="menu_wallet"), InlineKeyboardButton("ℹ️ Информация", callback_data="menu_info")],
+        [InlineKeyboardButton("💬 Чат", callback_data="menu_chat"), InlineKeyboardButton("👥 Рефералы", callback_data="menu_referrals")],
     ])
 
 
-def back_button(target: str = "menu_main") -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([[btn("🔴 Назад", target)]])
-
-
-def wallet_menu() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([
-        [btn("🟢 Пополнить", "wallet_deposit"), btn("🔴 Вывести", "wallet_withdraw")],
-        [btn("🔵 Стейкинг", "wallet_stake"), btn("📜 История", "wallet_history")],
-        [btn("🔴 Назад", "menu_main")],
+def wallet_kb():
+    # Telegram не поддерживает нативную заливку inline-кнопок, эмулируем цвет эмодзи и текстом
+    return kb([
+        [InlineKeyboardButton("🟢 Пополнить", callback_data="wallet_deposit"), InlineKeyboardButton("🔴 Вывести", callback_data="wallet_withdraw")],
+        [InlineKeyboardButton("🔵 Стейкинг", callback_data="wallet_staking"), InlineKeyboardButton("🔹 История", callback_data="wallet_history")],
+        [InlineKeyboardButton("🔴 Назад", callback_data="back_main")],
     ])
+
+
+def status_emoji(status):
+    return {"pending": "⏳", "completed": "✅", "failed": "❌"}.get(status, "⏳")
+
+
+async def show_main_menu(target, edit=False):
+    caption = (
+        "🏠 Главное меню\n\n"
+        "Добро пожаловать в инвестиционный проект.\n"
+        "Инвестируйте, используйте стейкинг и получайте доход.\n\n"
+        "Выберите действие:"
+    )
+    if SETTINGS.banner_path and (SETTINGS.banner_path.startswith("http") or Path(SETTINGS.banner_path).exists()):
+        if edit and getattr(target, "message", None):
+            await target.message.reply_photo(
+                photo=SETTINGS.banner_path if SETTINGS.banner_path.startswith("http") else InputFile(SETTINGS.banner_path),
+                caption=caption,
+                reply_markup=main_menu_kb(),
+            )
+        else:
+            await target.reply_photo(
+                photo=SETTINGS.banner_path if SETTINGS.banner_path.startswith("http") else InputFile(SETTINGS.banner_path),
+                caption=caption,
+                reply_markup=main_menu_kb(),
+            )
+    else:
+        if edit and getattr(target, "edit_message_text", None):
+            await target.edit_message_text(caption, reply_markup=main_menu_kb())
+        else:
+            await target.reply_text(caption, reply_markup=main_menu_kb())
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user
-    referrer_id = None
-    if context.args and context.args[0].startswith("ref"):
-        referrer_id = int(context.args[0].replace("ref", ""))
-    db.ensure_user(user.id, referrer_id)
-    text = (
-        "Добро пожаловать! Это инвестиционный проект, где вы можете вкладывать "
-        "средства в стейкинг и получать доход."
-    )
-    await update.message.reply_text(text, reply_markup=main_menu())
+    ref_code = context.args[0] if context.args else None
+    db.ensure_user(update.effective_user, ref_code)
+    await show_main_menu(update.message)
 
 
-async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     await q.answer()
     uid = q.from_user.id
-    db.ensure_user(uid)
+    db.ensure_user(q.from_user)
 
-    if q.data == "menu_main":
+    if q.data in {"back_main"}:
         context.user_data.clear()
-        await q.edit_message_text(
-            "Добро пожаловать! Выберите раздел.",
-            reply_markup=main_menu(),
-        )
-        return
-
-    if q.data == "menu_info":
-        plans = "\n".join([f"• {p.title}: {p.days} дн., +{p.percent}%" for p in SETTINGS.plans.values()])
+        await show_main_menu(q, edit=True)
+    elif q.data == "menu_info":
         txt = (
-            "Мы инвестиционный проект, вкладываемся в стейкинг и криптовалюту.\n"
-            "Заработок на стейкинге: от 1% до 10%.\n"
-            f"Реферальная комиссия: {SETTINGS.referral_percent}% от депозитов рефералов.\n\n"
-            f"Минимальный депозит: {SETTINGS.min_deposit_usdt} USDT\n"
-            f"Минимальный стейкинг: {SETTINGS.min_stake_usdt} USDT\n"
-            f"Минимальный вывод: {SETTINGS.min_withdraw_usdt} USDT\n\n"
-            f"Планы:\n{plans}"
+            "ℹ️ Информация о проекте\n\n"
+            "Это инвестиционный проект с пополнением через Crypto Pay и Telegram Stars, "
+            "выводом средств и доходом на стейкинге.\n\n"
+            "📈 Доходность: от 1% до 10%\n"
+            "👥 Реферальная комиссия: 5% от депозитов\n\n"
+            "📅 Планы стейкинга:\n"
+            "• Дневной: 1 день, +1%\n"
+            "• Недельный: 7 дней, +5%\n"
+            "• Месячный: 10 дней, +10%\n\n"
+            "📌 Минимальные суммы:\n"
+            "• Пополнение: 0.1 USDT\n"
+            "• Стейкинг: 10 USDT\n"
+            "• Вывод: 5 USDT\n\n"
+            f"💬 Поддержка: @{SETTINGS.support_username}"
         )
-        await q.edit_message_text(txt, reply_markup=back_button())
-        return
-
-    if q.data == "menu_chat":
-        kb = InlineKeyboardMarkup([
-            [InlineKeyboardButton("Открыть чат поддержки", url=SETTINGS.support_chat_url)],
-            [btn("🔴 Назад", "menu_main")],
-        ])
-        await q.edit_message_text("Свяжитесь с поддержкой в чате:", reply_markup=kb)
-        return
-
-    if q.data == "menu_wallet":
+        await q.edit_message_text(txt, reply_markup=kb([[InlineKeyboardButton("Назад", callback_data="back_main")]]))
+    elif q.data == "menu_wallet":
         u = db.get_user(uid)
-        active = db.get_active_stakes_count(uid)
-        await q.edit_message_text(
-            f"💼 Кошелек\n\n"
-            f"Доступно: {u['balance']:.2f} USDT\n"
-            f"В стейкинге: {u['staked_balance']:.2f} USDT\n"
-            f"Активные стейки: {active}",
-            reply_markup=wallet_menu(),
+        txt = (
+            "💰 Ваш кошелек\n\n"
+            f"💵 Доступный баланс: {u['balance']:.2f} USDT\n"
+            f"🔒 В стейкинге: {u['staked_balance']:.2f} USDT\n"
+            f"📊 Активных стейков: {db.get_active_stakes_count(uid)}\n\n"
+            "Выберите действие:"
         )
-        return
-
-    if q.data == "wallet_deposit":
-        kb = InlineKeyboardMarkup([
-            [btn("Crypto Bot", "deposit_method:cryptobot"), btn("Telegram Stars", "deposit_method:stars")],
-            [btn("🔴 Назад", "menu_wallet")],
-        ])
-        await q.edit_message_text("Выберите метод пополнения:", reply_markup=kb)
-        return
-
-    if q.data.startswith("deposit_method:"):
-        method = q.data.split(":", 1)[1]
+        await q.edit_message_text(txt, reply_markup=wallet_kb())
+    elif q.data == "wallet_deposit":
+        await q.edit_message_text("💼 Пополнение баланса\n\nВыберите способ пополнения:", reply_markup=kb([
+            [InlineKeyboardButton("Crypto Bot", callback_data="deposit_crypto")],
+            [InlineKeyboardButton("Telegram Stars", callback_data="deposit_stars")],
+            [InlineKeyboardButton("Назад", callback_data="menu_wallet")],
+        ]))
+    elif q.data in {"deposit_crypto", "deposit_stars"}:
+        method = "cryptobot" if q.data == "deposit_crypto" else "stars"
+        context.user_data["state"] = "await_deposit"
         context.user_data["deposit_method"] = method
-        context.user_data["state"] = "await_deposit_amount"
-        await q.edit_message_text(
-            f"Введите сумму пополнения в USDT через {'Crypto Bot' if method == 'cryptobot' else 'Telegram Stars'}:",
-            reply_markup=back_button("menu_wallet"),
-        )
-        return
-
-    if q.data == "wallet_withdraw":
-        context.user_data["state"] = "await_withdraw_amount"
-        await q.edit_message_text(
-            f"Введите сумму вывода (минимум {SETTINGS.min_withdraw_usdt} USDT):",
-            reply_markup=back_button("menu_wallet"),
-        )
-        return
-
-    if q.data.startswith("confirm_withdraw:"):
-        amount = float(q.data.split(":", 1)[1])
+        await q.edit_message_text("Введите сумму пополнения (минимум 0.1 USDT):", reply_markup=kb([[InlineKeyboardButton("Назад", callback_data="menu_wallet")]]))
+    elif q.data == "wallet_withdraw":
+        context.user_data["state"] = "await_withdraw"
         u = db.get_user(uid)
-        if u["balance"] < amount:
-            await q.edit_message_text("Недостаточно средств для вывода.", reply_markup=wallet_menu())
-            return
-        db.update_balance(uid, delta_balance=-amount)
-        db.add_transaction(uid, "withdraw", amount, "USDT", "processing", completed=False)
-        await q.edit_message_text("✅ Заявка на вывод создана.", reply_markup=wallet_menu())
-        return
-
-    if q.data == "wallet_stake":
-        kb = InlineKeyboardMarkup(
-            [[btn(p.title, f"stake_plan:{p.key}")] for p in SETTINGS.plans.values()]
-            + [[btn("🔴 Назад", "menu_wallet")]]
-        )
-        await q.edit_message_text("Выберите план стейкинга:", reply_markup=kb)
-        return
-
-    if q.data.startswith("stake_plan:"):
-        context.user_data["stake_plan"] = q.data.split(":", 1)[1]
-        context.user_data["state"] = "await_stake_amount"
-        await q.edit_message_text("Введите сумму для стейкинга:", reply_markup=back_button("menu_wallet"))
-        return
-
-    if q.data.startswith("confirm_stake:"):
-        amount = float(q.data.split(":", 1)[1])
-        plan = SETTINGS.plans[context.user_data["stake_plan"]]
-        u = db.get_user(uid)
-        if u["balance"] < amount:
-            await q.edit_message_text("Недостаточно средств.", reply_markup=wallet_menu())
-            return
-        income = round(amount * (plan.percent / 100), 8)
-        end_time = (datetime.utcnow() + timedelta(days=plan.days)).isoformat(sep=" ", timespec="seconds")
-        db.update_balance(uid, delta_balance=-amount, delta_staked=amount)
-        db.create_stake(uid, plan.key, amount, income, end_time)
-        db.add_transaction(uid, "stake", amount, "USDT", "successful")
+        await q.edit_message_text(f"📤 Вывод средств\n\n💰 Ваш баланс: {u['balance']:.2f} USDT\nМинимальная сумма вывода: 5 USDT\n\nВведите сумму для вывода:", reply_markup=kb([[InlineKeyboardButton("Назад", callback_data="menu_wallet")]]))
+    elif q.data == "wallet_staking":
         await q.edit_message_text(
-            f"✅ Стейк активирован\n"
-            f"План: {plan.title}\n"
-            f"Сумма: {amount:.2f} USDT\n"
-            f"Доход: {income:.2f} USDT\n"
-            f"К получению: {amount + income:.2f} USDT\n"
-            f"Окончание: {end_time} UTC",
-            reply_markup=wallet_menu(),
+            "📊 Стейкинг\n\nЗаморозьте средства на определенный период и получите гарантированную прибыль!\n\n"
+            "📅 Дневной план\n• Срок: 1 день\n• Доход: +1% к депозиту\n\n"
+            "📅 Недельный план\n• Срок: 7 дней\n• Доход: +5% к депозиту\n\n"
+            "📈 Месячный план\n• Срок: 10 дней\n• Доход: +10% к депозиту\n\nВыберите план:",
+            reply_markup=kb([
+                [InlineKeyboardButton("Дневной", callback_data="staking_daily"), InlineKeyboardButton("Недельный", callback_data="staking_weekly")],
+                [InlineKeyboardButton("Месячный", callback_data="staking_monthly"), InlineKeyboardButton("Мои стейки", callback_data="staking_my")],
+                [InlineKeyboardButton("Назад", callback_data="menu_wallet")],
+            ]),
         )
-        return
-
-    if q.data == "wallet_history":
-        txs = db.list_recent_transactions(uid)
-        if not txs:
-            lines = ["История пуста"]
+    elif q.data.startswith("staking_") and q.data in {"staking_daily", "staking_weekly", "staking_monthly"}:
+        plan = q.data.split("_")[1]
+        context.user_data["state"] = "await_stake"
+        context.user_data["stake_plan"] = plan
+        p = SETTINGS.plans[plan]
+        u = db.get_user(uid)
+        await q.edit_message_text(f"📊 {p.title} план стейкинга\n\n⏱ Период: {p.days} дн.\n📈 Доход: +{p.percent}%\n\n💰 Ваш баланс: {u['balance']:.2f} USDT\nМинимальная сумма: 10 USDT\n\nВведите сумму для стейкинга:", reply_markup=kb([[InlineKeyboardButton("Назад", callback_data="wallet_staking")]]))
+    elif q.data == "staking_my":
+        rows = db.list_active_stakes(uid)
+        if not rows:
+            txt = "📭 У вас пока нет активных стейков."
         else:
-            lines = [
-                f"• {t['type']} | {t['amount']:.2f} {t['currency']} | {t['created_at']} | {t['status']}"
-                for t in txs
-            ]
-        await q.edit_message_text("\n".join(lines), reply_markup=back_button("menu_wallet"))
-        return
-
-    if q.data == "menu_refs":
+            parts = ["📊 Ваши активные стейки:\n"]
+            for s in rows:
+                parts.append(f"• {s['plan']} | {s['amount']:.2f} USDT | +{s['profit']:.2f} | до {s['end_time']} | {s['status']}")
+            txt = "\n".join(parts)
+        await q.edit_message_text(txt, reply_markup=kb([[InlineKeyboardButton("Назад", callback_data="wallet_staking")]]))
+    elif q.data == "wallet_history":
+        txs = db.list_recent_transactions(uid, 10)
+        if not txs:
+            txt = "📜 История пуста."
+        else:
+            lines = ["📜 Последние транзакции:\n"]
+            for t in txs:
+                lines.append(f"📤 {t['type'].title()}: {t['amount']:.2f} {t['currency']} {status_emoji(t['status'])}\n{t['created_at']}\n")
+            txt = "\n".join(lines)
+        await q.edit_message_text(txt, reply_markup=kb([[InlineKeyboardButton("Назад", callback_data="menu_wallet")]]))
+    elif q.data == "menu_referrals":
         u = db.get_user(uid)
-        refs, earned = db.get_ref_stats(uid)
-        txt = (
-            f"Ваша реферальная ссылка:\n{SETTINGS.base_ref_url}{u['referral_code']}\n\n"
-            f"Рефералов: {refs}\n"
-            f"Заработано на рефералах: {earned:.2f} USDT\n"
-            f"Бонус: {SETTINGS.referral_percent}% от депозитов рефералов"
-        )
-        await q.edit_message_text(txt, reply_markup=back_button())
+        with db.conn() as c:
+            refs = c.execute("SELECT COUNT(*) c FROM users WHERE referrer_id=?", (uid,)).fetchone()["c"]
+        link = f"https://t.me/{SETTINGS.bot_username}?start={u['referral_code']}"
+        txt = f"👥 Реферальная программа\n\n🎁 Получайте 5% от депозитов ваших рефералов!\n\n📊 Ваша статистика:\n• Рефералов: {refs}\n• Заработано: {u['referral_earned']:.2f} USDT\n\n🔗 Ваша реферальная ссылка:\n{link}\n\nДелитесь ссылкой с друзьями и зарабатывайте!"
+        await q.edit_message_text(txt, reply_markup=kb([[InlineKeyboardButton("Скопировать", callback_data="referrals_copy")], [InlineKeyboardButton("Назад", callback_data="back_main")]]))
+    elif q.data == "referrals_copy":
+        u = db.get_user(uid)
+        link = f"https://t.me/{SETTINGS.bot_username}?start={u['referral_code']}"
+        await q.message.reply_text(f"Скопируйте ссылку:\n{link}")
+    elif q.data == "menu_chat":
+        await q.edit_message_text(f"💬 Поддержка: @{SETTINGS.support_username}", reply_markup=kb([[InlineKeyboardButton("Открыть поддержку", url=f"https://t.me/{SETTINGS.support_username}")], [InlineKeyboardButton("Назад", callback_data="back_main")]]))
 
 
-async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def message_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
     state = context.user_data.get("state")
     if not state:
         return
-
     uid = update.effective_user.id
     try:
         amount = float(update.message.text.replace(",", "."))
     except ValueError:
-        await update.message.reply_text("Введите корректное число.")
-        return
+        return await update.message.reply_text("Введите корректное число.")
+    if amount <= 0:
+        return await update.message.reply_text("Сумма должна быть больше 0.")
 
-    if state == "await_deposit_amount":
+    user = db.get_user(uid)
+    if state == "await_deposit":
         if amount < SETTINGS.min_deposit_usdt:
-            await update.message.reply_text(f"Минимум: {SETTINGS.min_deposit_usdt} USDT")
-            return
-        method = context.user_data.get("deposit_method", "cryptobot")
+            return await update.message.reply_text("Минимальная сумма пополнения: 0.1 USDT")
+        method = context.user_data.get("deposit_method")
+        tx = db.add_transaction(uid, "deposit", amount, status="pending", meta={"method": method})
+        db.complete_transaction(tx)
         db.update_balance(uid, delta_balance=amount)
-        db.add_transaction(uid, "deposit", amount, "USDT", f"successful:{method}")
-        db.add_ref_bonus_for_deposit(uid, amount, SETTINGS.referral_percent)
-        await update.message.reply_text(f"✅ Пополнение успешно: +{amount:.2f} USDT", reply_markup=main_menu())
+        db.apply_referral_bonus_if_needed(uid, amount, SETTINGS.referral_percent)
+        context.user_data.clear()
+        return await update.message.reply_text(f"✅ Пополнение подтверждено: +{amount:.2f} USDT")
 
-    elif state == "await_withdraw_amount":
-        u = db.get_user(uid)
+    if state == "await_withdraw":
         if amount < SETTINGS.min_withdraw_usdt:
-            await update.message.reply_text(f"Минимум: {SETTINGS.min_withdraw_usdt} USDT")
-            return
-        if u["balance"] < amount:
-            await update.message.reply_text("Недостаточно средств.")
-            return
-        kb = InlineKeyboardMarkup([
-            [btn("✅ Подтвердить", f"confirm_withdraw:{amount}"), btn("❌ Отмена", "menu_wallet")],
-        ])
-        await update.message.reply_text(f"Подтвердите вывод {amount:.2f} USDT", reply_markup=kb)
-        context.user_data["state"] = None
-        return
+            return await update.message.reply_text("Минимальная сумма вывода: 5 USDT")
+        if amount > user["balance"]:
+            return await update.message.reply_text("Недостаточно средств на балансе.")
+        db.update_balance(uid, delta_balance=-amount)
+        db.add_transaction(uid, "withdraw", amount, status="pending", meta={"note": "manual processing"})
+        context.user_data.clear()
+        return await update.message.reply_text("✅ Заявка на вывод создана и отправлена в обработку.")
 
-    elif state == "await_stake_amount":
-        plan = SETTINGS.plans[context.user_data["stake_plan"]]
-        u = db.get_user(uid)
+    if state == "await_stake":
         if amount < SETTINGS.min_stake_usdt:
-            await update.message.reply_text(f"Минимальный стейк: {SETTINGS.min_stake_usdt} USDT")
-            return
-        if u["balance"] < amount:
-            await update.message.reply_text("Недостаточно средств.")
-            return
-        income = round(amount * (plan.percent / 100), 8)
-        kb = InlineKeyboardMarkup([
-            [btn("✅ Подтвердить", f"confirm_stake:{amount}"), btn("❌ Отмена", "menu_wallet")],
-        ])
-        await update.message.reply_text(
-            f"Подтвердите стейкинг\nПлан: {plan.title}\nСумма: {amount:.2f} USDT\n"
-            f"Ожидаемый доход: {income:.2f} USDT\nК получению: {amount + income:.2f} USDT",
-            reply_markup=kb,
+            return await update.message.reply_text("Минимальная сумма стейкинга: 10 USDT")
+        if amount > user["balance"]:
+            return await update.message.reply_text("Недостаточно средств на балансе.")
+        plan = SETTINGS.plans[context.user_data["stake_plan"]]
+        profit = round(amount * plan.percent / 100, 2)
+        total = round(amount + profit, 2)
+        end = (datetime.utcnow() + timedelta(days=plan.days)).strftime("%Y-%m-%d %H:%M:%S")
+        db.update_balance(uid, delta_balance=-amount, delta_staked=amount)
+        db.create_stake(uid, plan.key, amount, plan.percent, profit, total, end)
+        db.add_transaction(uid, "stake", amount, status="completed", completed=True, meta={"plan": plan.key})
+        context.user_data.clear()
+        return await update.message.reply_text(
+            f"✅ Стейкинг активирован!\n\n📊 План: {plan.title}\n💰 Сумма: {amount:.2f} USDT\n📈 Доход: +{profit:.2f} USDT ({plan.percent}%)\n"
+            f"💵 Итого к получению: {total:.2f} USDT\n⏱ Период: {plan.days} дн.\n⏰ Завершится: {end}\n\n"
+            "Средства будут автоматически зачислены на баланс после окончания срока."
         )
-        context.user_data["state"] = None
-        return
-
-    context.user_data["state"] = None
 
 
-def run():
+def main():
     db.init_db()
-    app = Application.builder().token(SETTINGS.bot_token).build()
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CallbackQueryHandler(callback_router))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
-
     scheduler = BackgroundScheduler(timezone="UTC")
-    scheduler.add_job(db.process_finished_stakes, "interval", seconds=30)
+    scheduler.add_job(db.process_finished_stakes, "interval", minutes=1)
     scheduler.start()
 
+    app = Application.builder().token(SETTINGS.bot_token).build()
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CallbackQueryHandler(callbacks))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_input))
     app.run_polling()
 
 
 if __name__ == "__main__":
-    run()
+    main()
