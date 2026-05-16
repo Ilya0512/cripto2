@@ -125,6 +125,8 @@ def ensure_user(tg_user, referral_code=None):
     with conn() as c:
         row = c.execute("SELECT * FROM users WHERE user_id=?", (tg_user.id,)).fetchone()
         if row:
+            if not row["referral_code"]:
+                c.execute("UPDATE users SET referral_code=? WHERE user_id=?", (f"ref{tg_user.id}", tg_user.id))
             if row["referrer_id"] is None and referral_code:
                 ref = get_user_by_referral_code(referral_code)
                 if ref and ref["user_id"] != tg_user.id:
@@ -137,7 +139,7 @@ def ensure_user(tg_user, referral_code=None):
                 referrer_id = ref["user_id"]
         c.execute(
             "INSERT INTO users(user_id,username,first_name,referral_code,referrer_id,created_at) VALUES(?,?,?,?,?,?)",
-            (tg_user.id, tg_user.username, tg_user.first_name, f"ref_{tg_user.id}", referrer_id, now_str()),
+            (tg_user.id, tg_user.username, tg_user.first_name, f"ref{tg_user.id}", referrer_id, now_str()),
         )
 
 

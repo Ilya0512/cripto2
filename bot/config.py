@@ -16,15 +16,15 @@ class StakingPlan:
 @dataclass(frozen=True)
 class Settings:
     bot_token: str = os.getenv("BOT_TOKEN", "")
-    bot_username: str = os.getenv("BOT_USERNAME", "your_bot_username")
-    support_username: str = os.getenv("SUPPORT_USERNAME", "chromkey")
+    bot_username: str = os.getenv("BOT_USERNAME", "").strip()
+    support_username: str = os.getenv("SUPPORT_USERNAME", "").strip().lstrip("@")
     banner_path: str = os.getenv("BANNER_PATH", "")
     cryptobot_token: str = os.getenv("CRYPTOBOT_TOKEN", "")
 
     min_deposit_usdt: float = float(os.getenv("MIN_DEPOSIT_USDT", "15"))
     min_stake_usdt: float = float(os.getenv("MIN_STAKE_USDT", "15"))
     min_withdraw_usdt: float = float(os.getenv("MIN_WITHDRAW_USDT", "20"))
-    referral_percent: float = float(os.getenv("REFERRAL_PERCENT", "5"))
+    referral_percent: float = float(os.getenv("REFERRAL_PERCENT", "7"))
 
     plans: dict = None
 

@@ -1,6 +1,7 @@
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+import aiogram
 from aiogram import Bot, Dispatcher, F, Router
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
@@ -12,40 +13,86 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from bot import db
 from bot.config import SETTINGS
 
+try:
+    from aiogram.enums import ButtonStyle
+except ImportError:  # pragma: no cover
+    from aiogram.enums.button_style import ButtonStyle
+
+try:
+    from aiogram.types import CopyTextButton
+except ImportError:  # pragma: no cover
+    CopyTextButton = None
+
 router = Router()
 user_states: dict[int, dict[str, str]] = {}
 WELCOME_TEXT = "🏠 Добро пожаловать!\nИнвестируйте и зарабатывайте с нашим проектом."
+BOT_USERNAME_RUNTIME: str = ""
 
 
-def kb(rows: list[list[InlineKeyboardButton]]) -> InlineKeyboardMarkup:
+PLAN_TRANSLATIONS = {"daily": "Дневной", "weekly": "Недельный", "monthly": "Месячный"}
+TX_TRANSLATIONS = {
+    "deposit": "Пополнение",
+    "withdraw": "Вывод",
+    "stake": "Стейкинг",
+    "referral_bonus": "Реф. бонус",
+    "stake_profit": "Доход стейкинга",
+}
+
+
+def kb(rows: list[list[InlineKeyboardButton | dict]]) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def style_btn(text: str, callback_data: str) -> InlineKeyboardButton:
-    return InlineKeyboardButton(text=text, callback_data=callback_data)
+def styled_button(text: str, *, callback_data: str | None = None, style: ButtonStyle | None = None, url: str | None = None) -> InlineKeyboardButton | dict:
+    kwargs = {"text": text}
+    if callback_data:
+        kwargs["callback_data"] = callback_data
+    if url:
+        kwargs["url"] = url
+    if style is not None:
+        kwargs["style"] = style
+    try:
+        return InlineKeyboardButton(**kwargs)
+    except TypeError:
+        if style is not None:
+            kwargs["style"] = str(style.value if hasattr(style, "value") else style).lower()
+        return kwargs
 
 
-def back_btn(target: str = "back_main") -> InlineKeyboardButton:
-    return style_btn("← Назад", target)
+def copy_button(text: str, value: str) -> InlineKeyboardButton | dict:
+    if CopyTextButton is not None:
+        try:
+            return InlineKeyboardButton(text=text, copy_text=CopyTextButton(text=value))
+        except TypeError:
+            pass
+    return {"text": text, "copy_text": {"text": value}}
+
+
+def back_btn(target: str = "back_main") -> InlineKeyboardButton | dict:
+    return styled_button("← Назад", callback_data=target, style=ButtonStyle.DANGER)
 
 
 def main_menu_kb() -> InlineKeyboardMarkup:
     return kb([
-        [style_btn("Кошелек", "menu_wallet"), style_btn("Информация", "menu_info")],
-        [style_btn("Чат", "menu_chat"), style_btn("Рефералы", "menu_referrals")],
+        [styled_button("Кошелек", callback_data="menu_wallet"), styled_button("Информация", callback_data="menu_info")],
+        [styled_button("Чат", url=f"https://t.me/{SETTINGS.support_username}"), styled_button("Рефералы", callback_data="menu_referrals")],
     ])
 
 
 def wallet_kb() -> InlineKeyboardMarkup:
     return kb([
-        [style_btn("Пополнить", "wallet_deposit"), style_btn("Вывести", "wallet_withdraw")],
-        [style_btn("Стейкинг", "wallet_stake"), style_btn("История", "wallet_history")],
+        [styled_button("Пополнить", callback_data="wallet_deposit", style=ButtonStyle.SUCCESS), styled_button("Вывести", callback_data="wallet_withdraw", style=ButtonStyle.DANGER)],
+        [styled_button("Стейкинг", callback_data="wallet_stake", style=ButtonStyle.PRIMARY), styled_button("История", callback_data="wallet_history", style=ButtonStyle.PRIMARY)],
         [back_btn("wallet_back")],
     ])
 
 
 def status_emoji(status: str) -> str:
     return {"pending": "⏳", "completed": "✅", "failed": "❌"}.get(status, "⏳")
+
+
+def referral_link(ref_code: str) -> str:
+    return f"https://t.me/{BOT_USERNAME_RUNTIME}?start={ref_code}"
 
 
 async def delete_current_message(message: Message) -> None:
@@ -105,17 +152,17 @@ async def callbacks(q: CallbackQuery) -> None:
     elif q.data == "menu_wallet":
         u = db.get_user(uid)
         txt = (
-            "💰 Ваш кошелек\n"
+            "💰 Ваш кошелек\n\n"
             f"💵 Доступный баланс: {u['balance']:.2f} USDT\n"
             f"🔒 В стейкинге: {u['staked_balance']:.2f} USDT\n"
-            f"📊 Активных стейков: {db.get_active_stakes_count(uid)}\n"
+            f"📊 Активных стейков: {db.get_active_stakes_count(uid)}\n\n"
             "Выберите действие:"
         )
         await open_section(q, txt, wallet_kb())
     elif q.data == "wallet_deposit":
         await open_section(q, "💼 Пополнение баланса\n\nВыберите способ пополнения:", kb([
-            [style_btn("Crypto Bot", "deposit_crypto")],
-            [style_btn("Telegram Stars", "deposit_stars")],
+            [styled_button("Crypto Bot", callback_data="deposit_crypto")],
+            [styled_button("Telegram Stars", callback_data="deposit_stars")],
             [back_btn("menu_wallet")],
         ]))
     elif q.data in {"deposit_crypto", "deposit_stars"}:
@@ -131,8 +178,8 @@ async def callbacks(q: CallbackQuery) -> None:
             q,
             "📊 Стейкинг\n\n📅 Дневной план\n• Срок: 1 день\n• Доход: +1%\n\n📅 Недельный план\n• Срок: 7 дней\n• Доход: +5%\n\n📈 Месячный план\n• Срок: 10 дней\n• Доход: +10%\n\nВыберите план:",
             kb([
-                [style_btn("Дневной", "staking_daily"), style_btn("Недельный", "staking_weekly")],
-                [style_btn("Месячный", "staking_monthly"), style_btn("Мои стейки", "staking_my")],
+                [styled_button("Дневной", callback_data="staking_daily"), styled_button("Недельный", callback_data="staking_weekly")],
+                [styled_button("Месячный", callback_data="staking_monthly"), styled_button("Мои стейки", callback_data="staking_my")],
                 [back_btn("menu_wallet")],
             ]),
         )
@@ -144,24 +191,44 @@ async def callbacks(q: CallbackQuery) -> None:
         await open_section(q, f"📊 {p.title} план\nПериод: {p.days} дн.\nДоход: +{p.percent}%\n\nВведите сумму:", kb([[back_btn("wallet_stake")]]))
     elif q.data == "staking_my":
         rows = db.list_active_stakes(uid)
-        txt = "📭 У вас пока нет активных стейков." if not rows else "\n".join(["📊 Ваши активные стейки:"] + [f"• {s['plan']} | {s['amount']:.2f} USDT | +{s['profit']:.2f} | до {s['end_time']}" for s in rows])
+        if not rows:
+            txt = "📭 У вас пока нет активных стейков."
+        else:
+            stake_lines = []
+            for s in rows:
+                title = PLAN_TRANSLATIONS.get(s["plan"], s["plan"])
+                stake_lines.append(
+                    f"• {title}\n  Сумма: {s['amount']:.2f} USDT\n  Доход: {s['profit']:.2f} USDT\n  Завершится: {s['end_time']}"
+                )
+            txt = "📊 Ваши активные стейки:\n\n" + "\n\n".join(stake_lines)
         await open_section(q, txt, kb([[back_btn("wallet_stake")]]))
     elif q.data == "wallet_history":
         txs = db.list_recent_transactions(uid, 10)
-        txt = "📜 История пуста." if not txs else "\n".join(["📜 Последние транзакции:"] + [f"{status_emoji(t['status'])} {t['type'].title()}: {t['amount']:.2f} {t['currency']} ({t['created_at']})" for t in txs])
+        if not txs:
+            txt = "📜 История пуста."
+        else:
+            items = []
+            for t in txs:
+                title = TX_TRANSLATIONS.get(t["type"], t["type"].title())
+                items.append(f"{status_emoji(t['status'])} {title}: {t['amount']:.2f} {t['currency']}\n{t['created_at']}")
+            txt = "📜 Последние транзакции:\n\n" + "\n\n".join(items)
         await open_section(q, txt, kb([[back_btn("menu_wallet")]]))
     elif q.data == "menu_referrals":
         u = db.get_user(uid)
         with db.conn() as c:
             refs = c.execute("SELECT COUNT(*) c FROM users WHERE referrer_id=?", (uid,)).fetchone()["c"]
-        link = f"https://t.me/{SETTINGS.bot_username}?start={u['referral_code']}"
-        txt = f"👥 Реферальная программа\n\nРефералов: {refs}\nЗаработано: {u['referral_earned']:.2f} USDT\n\n🔗 {link}"
-        await open_section(q, txt, kb([[style_btn("Скопировать", "referrals_copy")], [back_btn()]]))
-    elif q.data == "referrals_copy":
-        u = db.get_user(uid)
-        await q.answer(f"https://t.me/{SETTINGS.bot_username}?start={u['referral_code']}", show_alert=True)
-    elif q.data == "menu_chat":
-        await open_section(q, f"💬 Поддержка: @{SETTINGS.support_username}", kb([[InlineKeyboardButton(text="Открыть чат", url=f"https://t.me/{SETTINGS.support_username}")], [back_btn()]]))
+        link = referral_link(u["referral_code"])
+        txt = (
+            "👥 Реферальная программа\n\n"
+            f"🎁 Получайте {SETTINGS.referral_percent:g}% от депозитов ваших рефералов!\n\n"
+            "📊 Ваша статистика:\n"
+            f"• Рефералов: {refs}\n"
+            f"• Заработано: {u['referral_earned']:.2f} USDT\n\n"
+            "🔗 Ваша реферальная ссылка:\n"
+            f"{link}\n\n"
+            "Делитесь ссылкой с друзьями и зарабатывайте!"
+        )
+        await open_section(q, txt, kb([[copy_button("Скопировать", link)], [back_btn()]]))
 
 
 @router.message(F.text)
@@ -218,12 +285,24 @@ async def amount_input(message: Message) -> None:
 
 
 async def main() -> None:
+    global BOT_USERNAME_RUNTIME
+    print("Aiogram version:", aiogram.__version__)
+    if tuple(map(int, aiogram.__version__.split("."))) < (3, 27, 0):
+        print("Для цветных кнопок нужен aiogram >= 3.27.0. Выполните: pip install -U aiogram")
+
     db.init_db()
     scheduler = AsyncIOScheduler(timezone="UTC")
     scheduler.add_job(db.process_finished_stakes, "interval", minutes=1)
     scheduler.start()
 
     bot = Bot(token=SETTINGS.bot_token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+    me = await bot.get_me()
+    BOT_USERNAME_RUNTIME = SETTINGS.bot_username or ""
+    if not BOT_USERNAME_RUNTIME:
+        BOT_USERNAME_RUNTIME = me.username or ""
+    if not BOT_USERNAME_RUNTIME or " " in BOT_USERNAME_RUNTIME or BOT_USERNAME_RUNTIME.startswith("@"):
+        BOT_USERNAME_RUNTIME = me.username or ""
+
     dp = Dispatcher()
     dp.include_router(router)
     await dp.start_polling(bot)
