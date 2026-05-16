@@ -21,9 +21,9 @@ class Settings:
     banner_path: str = os.getenv("BANNER_PATH", "")
     cryptobot_token: str = os.getenv("CRYPTOBOT_TOKEN", "")
 
-    min_deposit_usdt: float = float(os.getenv("MIN_DEPOSIT_USDT", "0.1"))
-    min_stake_usdt: float = float(os.getenv("MIN_STAKE_USDT", "10"))
-    min_withdraw_usdt: float = float(os.getenv("MIN_WITHDRAW_USDT", "5"))
+    min_deposit_usdt: float = float(os.getenv("MIN_DEPOSIT_USDT", "15"))
+    min_stake_usdt: float = float(os.getenv("MIN_STAKE_USDT", "15"))
+    min_withdraw_usdt: float = float(os.getenv("MIN_WITHDRAW_USDT", "20"))
     referral_percent: float = float(os.getenv("REFERRAL_PERCENT", "5"))
 
     plans: dict = None
